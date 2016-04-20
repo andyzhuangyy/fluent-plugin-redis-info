@@ -4,7 +4,8 @@ class Fluent::Redis_InfoInput < Fluent::Input
   config_param :tag,      :string
   config_param :host,     :string,  :default => nil
   config_param :port,     :integer, :default => 6379
-  config_param :interval, :integer,  :default => 10
+  config_param :interval, :integer, :default => 10
+  config_param :command,  :string,  :default => nil
 
 
   def initialize
@@ -13,9 +14,9 @@ class Fluent::Redis_InfoInput < Fluent::Input
   end
 
   def adjust_type(value)
-    if value =~ /^\d+\.\d+$/
+    if value =~ /^\-*\d+\.\d+$/
       return value.to_f
-    elsif value =~ /^\d+$/
+    elsif value =~ /^\-*\d+$/
       return value.to_i
     end
     value
@@ -23,7 +24,6 @@ class Fluent::Redis_InfoInput < Fluent::Input
 
   def configure(conf)
     super
-    @log_id = 0
     @get_interval = @interval
   end
 
@@ -52,23 +52,27 @@ class Fluent::Redis_InfoInput < Fluent::Input
   def watch
     while true
       sleep @get_interval
-      output()
+      output
     end
   end
 
-  def output( last_id = 0) 
-    info = {}
-    info = @redis.info("all")
+  def output 
+    info = @redis.info(@command)
 
-    #info.each do |key,value|
-      #unless log[0] > last_id
-        #next
-      #end
-      #log_hash = { id: log[0], timestamp: Time.at(log[1]).to_i, exec_time: log[2], command: log[3] }
-      #Fluent::Engine.emit(tag, Time.now.to_i, log_hash)
-    #end
+    output_info = {}
+    info.each do |key, value|
+      if key =~/^cmdstat_/ || key =~ /^db\d+/
+        output_value = {}
+        Hash[value.split(",").map { |e| e.split("=") }].each do |k,v|
+          output_value[k] = adjust_type(v)
+        end
+        output_info[key] = output_value
+      else
+        output_info[key] = adjust_type(value)
+      end
+    end
 
-    Fluent::Engine.emit(tag, Time.now.to_i, info)
+    Fluent::Engine.emit(tag, Time.now.to_i, output_info)
   end
 end
 
